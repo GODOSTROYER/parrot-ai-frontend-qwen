@@ -16,6 +16,9 @@ import { VoiceLibrary, SaveVoiceDialog, type Voice } from "@/components/voice-li
 import { ModelSwitcher } from "@/components/model-switcher"
 import { VoiceDesignPanel } from "@/components/voice-design-panel"
 import { CustomVoicePanel } from "@/components/custom-voice-panel"
+import { ScriptPanel } from "@/components/script-panel"
+import { AdvancedSettings, type GenerationConfig } from "@/components/advanced-settings"
+import { HistorySidebar, type HistoryItem } from "@/components/history-sidebar"
 
 export default function ParrotAI() {
   const [prompt, setPrompt] = useState("")
@@ -53,6 +56,48 @@ export default function ParrotAI() {
   const [currentModel, setCurrentModel] = useState("base")
   const [isSwitchingModel, setIsSwitchingModel] = useState(false)
   const [isGeneratingAux, setIsGeneratingAux] = useState(false)
+  
+  // Advanced Generation Params
+  const [genConfig, setGenConfig] = useState<GenerationConfig>({
+    temperature: 0.8,
+    top_p: 0.8,
+    top_k: 50,
+    repetition_penalty: 1.1,
+  })
+
+  // History State
+  const [history, setHistory] = useState<HistoryItem[]>([])
+
+  useEffect(() => {
+    const saved = localStorage.getItem("parrot_history")
+    if (saved) {
+        try { setHistory(JSON.parse(saved)) } catch (e) { console.error("Failed to load history", e) }
+    }
+  }, [])
+
+  const addToHistory = (text: string, mode: "cloning" | "design" | "preset", audioData: string) => {
+      const newItem: HistoryItem = {
+          id: Date.now().toString(),
+          timestamp: Date.now(),
+          text,
+          mode,
+          audioBase64: audioData,
+          configSummary: `T=${genConfig.temperature} P=${genConfig.top_p} K=${genConfig.top_k}`
+      }
+      setHistory(prev => {
+          const updated = [newItem, ...prev].slice(0, 10) // Limit to 10
+          localStorage.setItem("parrot_history", JSON.stringify(updated))
+          return updated
+      })
+  }
+  
+  const blobToBase64 = (blob: Blob): Promise<string> => {
+    return new Promise((resolve, _) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.readAsDataURL(blob);
+    });
+  }
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
@@ -125,7 +170,7 @@ export default function ParrotAI() {
   }
 
   useEffect(() => {
-    const SpeechRecognition = window.SpeechRecognition || (window as any).webkitSpeechRecognition
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
     if (SpeechRecognition) {
       const recognition = new SpeechRecognition()
       recognition.continuous = true
@@ -528,6 +573,12 @@ export default function ParrotAI() {
   const handleModelChange = async (newModel: string) => {
       if (newModel === currentModel) return;
       
+      // Dialogue mode is client-side orchestration, handled by its own endpoint
+      if (newModel === "dialogue") {
+          setCurrentModel(newModel);
+          return;
+      }
+      
       setIsSwitchingModel(true);
       try {
           const formData = new FormData();
@@ -556,6 +607,10 @@ export default function ParrotAI() {
       const formData = new FormData();
       formData.append("text", text);
       formData.append("instruct", instruct);
+      formData.append("temperature", genConfig.temperature.toString())
+      formData.append("top_p", genConfig.top_p.toString())
+      formData.append("top_k", genConfig.top_k.toString())
+      formData.append("repetition_penalty", genConfig.repetition_penalty.toString())
       
       try {
           const response = await fetch("http://localhost:8000/api/generate-design", {
@@ -563,7 +618,12 @@ export default function ParrotAI() {
               body: formData
           });
           if (!response.ok) throw new Error("Failed to generate");
-          return await response.blob(); 
+          const blob = await response.blob(); 
+          
+          // Add to history
+          blobToBase64(blob).then(b64 => addToHistory(text, "design", b64));
+          
+          return blob;
       } catch (error) {
           setStatus({ type: "error", message: "Generation failed" });
           return null;
@@ -574,6 +634,10 @@ export default function ParrotAI() {
       const formData = new FormData();
       formData.append("text", text);
       formData.append("speaker", speaker);
+      formData.append("temperature", genConfig.temperature.toString())
+      formData.append("top_p", genConfig.top_p.toString())
+      formData.append("top_k", genConfig.top_k.toString())
+      formData.append("repetition_penalty", genConfig.repetition_penalty.toString())
       
       try {
           const response = await fetch("http://localhost:8000/api/generate-preset", {
@@ -581,12 +645,40 @@ export default function ParrotAI() {
               body: formData
           });
           if (!response.ok) throw new Error("Failed to generate");
-          return await response.blob(); 
+          const blob = await response.blob();
+          
+          // Add to history
+          blobToBase64(blob).then(b64 => addToHistory(text, "preset", b64));
+          
+          return blob;
       } catch (error) {
           setStatus({ type: "error", message: "Generation failed" });
           return null;
       }
   };
+
+  const handleGenerateDialogue = async (lines: any[]) => {
+      try {
+          const response = await fetch("http://localhost:8000/api/generate-dialogue", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ lines })
+          });
+          if (!response.ok) throw new Error("Failed to generate dialogue");
+          const blob = await response.blob();
+          
+          blobToBase64(blob).then(b64 => addToHistory("Multi-Speaker Dialogue", "dialogue" as any, b64));
+          
+          return blob;
+      } catch (error) {
+           console.error("Dialogue Error:", error);
+           setStatus({ 
+               type: "error", 
+               message: error instanceof Error ? error.message : "Dialogue generation failed" 
+           });
+           return null;
+      }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -621,11 +713,17 @@ export default function ParrotAI() {
       formData.append("use_transcript", useManualTranscript.toString())
       formData.append("reference_text", referenceText)
       
-      if (activeTab === "upload" && referenceFile) {
+        if (activeTab === "upload" && referenceFile) {
         formData.append("audio_file", referenceFile)
       } else if (activeTab === "saved" && selectedVoiceId) {
         formData.append("voice_id", selectedVoiceId)
       }
+      
+      // Add advanced params
+      formData.append("temperature", genConfig.temperature.toString())
+      formData.append("top_p", genConfig.top_p.toString())
+      formData.append("top_k", genConfig.top_k.toString())
+      formData.append("repetition_penalty", genConfig.repetition_penalty.toString())
 
       // Use streaming endpoint for progress updates
       const response = await fetch("http://localhost:8000/api/generate-stream", {
@@ -679,6 +777,12 @@ export default function ParrotAI() {
                 const audioBlob = new Blob([byteArray], { type: "audio/wav" })
                 const url = URL.createObjectURL(audioBlob)
                 setOutputUrl(url)
+                
+                // Add to history
+                // data.audio is raw base64, need data URI prefix for playback/download
+                const dataUri = `data:audio/wav;base64,${data.audio}`;
+                addToHistory(prompt, "cloning", dataUri);
+                
                 setProgress({ percent: 100, message: "Done!" })
                 setStatus({ type: "success", message: "Audio generated successfully!" })
               } else if (eventType === "error") {
@@ -721,7 +825,27 @@ export default function ParrotAI() {
 
       <div className="max-w-2xl mx-auto px-4 py-16 lg:py-20 space-y-12">
         {/* Header Section */}
-        <div className="text-center space-y-4">
+        <div className="text-center space-y-4 relative">
+          <div className="absolute right-0 top-0 hidden lg:block">
+              <HistorySidebar 
+                items={history} 
+                onPlay={(item) => {
+                   if (item.audioBase64) {
+                       setAudioUrl(item.audioBase64);
+                       setIsPlaying(false); // Reset player state
+                   }
+                }}
+                onDelete={(id) => {
+                    const updated = history.filter(h => h.id !== id)
+                    setHistory(updated)
+                    localStorage.setItem("parrot_history", JSON.stringify(updated))
+                }}
+                onClear={() => {
+                    setHistory([])
+                    localStorage.setItem("parrot_history", JSON.stringify([]))
+                }}
+              />
+          </div>
           <div className="inline-flex items-center justify-center">
             <div className="relative group">
               <div className="absolute inset-0 bg-gradient-to-r from-primary to-accent rounded-full blur-2xl opacity-40 group-hover:opacity-60 transition-opacity animate-pulse" />
@@ -748,8 +872,26 @@ export default function ParrotAI() {
             isLoading={isSwitchingModel} 
         />
 
-        {currentModel === "design" && <VoiceDesignPanel onGenerate={handleGenerateDesign} />}
-        {currentModel === "custom" && <CustomVoicePanel onGenerate={handleGeneratePreset} />}
+        {currentModel === "design" && (
+            <VoiceDesignPanel 
+                onGenerate={handleGenerateDesign} 
+                genConfig={genConfig}
+                setGenConfig={setGenConfig}
+            />
+        )}
+        {currentModel === "custom" && (
+            <CustomVoicePanel 
+                onGenerate={handleGeneratePreset}
+                genConfig={genConfig}
+                setGenConfig={setGenConfig}
+            />
+        )}
+        {currentModel === "dialogue" && (
+            <ScriptPanel 
+                savedVoices={savedVoices}
+                onGenerate={handleGenerateDialogue}
+            />
+        )}
 
         {currentModel === "base" && (
         <Card className="border border-primary/10 bg-card/90 backdrop-blur-2xl shadow-[0_32px_64px_-16px_rgba(0,0,0,0.1)] ring-1 ring-white/20">
@@ -790,6 +932,10 @@ export default function ParrotAI() {
                     <span className="font-medium">Listening to your voice...</span>
                   </div>
                 )}
+
+                
+                {/* Advanced Settings */}
+                <AdvancedSettings config={genConfig} onConfigChange={setGenConfig} />
               </div>
 
               {/* Reference Text Section */}

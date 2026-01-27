@@ -5,11 +5,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Sparkles, Play, Download, Loader2 } from "lucide-react";
 
+import { AdvancedSettings, type GenerationConfig } from "./advanced-settings";
+
 interface VoiceDesignPanelProps {
     onGenerate: (text: string, instruct: string) => Promise<Blob | null>;
+    genConfig: GenerationConfig;
+    setGenConfig: (config: GenerationConfig) => void;
 }
 
-export function VoiceDesignPanel({ onGenerate }: VoiceDesignPanelProps) {
+export function VoiceDesignPanel({ onGenerate, genConfig, setGenConfig }: VoiceDesignPanelProps) {
     const [text, setText] = useState("");
     const [instruct, setInstruct] = useState("");
     const [isGenerating, setIsGenerating] = useState(false);
@@ -60,6 +64,8 @@ export function VoiceDesignPanel({ onGenerate }: VoiceDesignPanelProps) {
                             className="bg-input border-border text-foreground placeholder:text-muted-foreground focus-visible:ring-primary"
                         />
                     </div>
+
+                    <AdvancedSettings config={genConfig} onConfigChange={setGenConfig} />
 
                     <Button 
                         onClick={handleGenerate} 

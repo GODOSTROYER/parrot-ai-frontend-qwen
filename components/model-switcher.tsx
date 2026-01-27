@@ -25,6 +25,7 @@ export function ModelSwitcher({ currentModel, onModelChange, isLoading }: ModelS
                     <SelectItem value="base">🎙️ Voice Cloning (Default)</SelectItem>
                     <SelectItem value="design">🎨 Voice Design (Text-to-Voice)</SelectItem>
                     <SelectItem value="custom">🎭 Preset Characters (High Quality)</SelectItem>
+                    <SelectItem value="dialogue">💬 Multi-Speaker Dialogue (Beta)</SelectItem>
                 </SelectContent>
             </Select>
         </div>

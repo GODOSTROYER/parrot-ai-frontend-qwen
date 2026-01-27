@@ -6,8 +6,12 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Users, Play, Loader2 } from "lucide-react";
 
+import { AdvancedSettings, type GenerationConfig } from "./advanced-settings";
+
 interface CustomVoicePanelProps {
     onGenerate: (text: string, speaker: string) => Promise<Blob | null>;
+    genConfig: GenerationConfig;
+    setGenConfig: (config: GenerationConfig) => void;
 }
 
 const PRESETS = [
@@ -22,7 +26,7 @@ const PRESETS = [
     { id: "Sohee", name: "Sohee (Korean - Warm)", lang: "Korean" },
 ];
 
-export function CustomVoicePanel({ onGenerate }: CustomVoicePanelProps) {
+export function CustomVoicePanel({ onGenerate, genConfig, setGenConfig }: CustomVoicePanelProps) {
     const [text, setText] = useState("");
     const [speaker, setSpeaker] = useState("");
     const [isGenerating, setIsGenerating] = useState(false);
@@ -79,6 +83,8 @@ export function CustomVoicePanel({ onGenerate }: CustomVoicePanelProps) {
                             className="bg-input border-border text-foreground placeholder:text-muted-foreground focus-visible:ring-primary"
                         />
                     </div>
+
+                    <AdvancedSettings config={genConfig} onConfigChange={setGenConfig} />
 
                     <Button 
                         onClick={handleGenerate} 
