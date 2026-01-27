@@ -2,29 +2,20 @@
 
 import type React from "react"
 import { useState, useRef, useEffect } from "react"
-import { Mic, Upload, AudioWaveform as Waveform, Loader2, Music, Zap } from "lucide-react"
+import { Mic, Upload, AudioWaveform as Waveform, Loader2, Music, Zap, Play, Pause, Scissors, X, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Slider } from "@/components/ui/slider"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
 
-const VOICE_STYLES = [
-  { value: "default", label: "Default", description: "Natural voice" },
-  { value: "whispering", label: "Whispering", description: "Soft whisper" },
-  { value: "cheerful", label: "Cheerful", description: "Happy and upbeat" },
-  { value: "terrified", label: "Terrified", description: "Scared voice" },
-  { value: "angry", label: "Angry", description: "Intense and angry" },
-  { value: "sad", label: "Sad", description: "Melancholic voice" },
-  { value: "friendly", label: "Friendly", description: "Warm and friendly" },
-]
-
 export default function ParrotAI() {
   const [prompt, setPrompt] = useState("")
-  const [style, setStyle] = useState("default")
+  const [referenceText, setReferenceText] = useState("")
+  const [useManualTranscript, setUseManualTranscript] = useState(false)
   const [referenceFile, setReferenceFile] = useState<File | null>(null)
   const [fileName, setFileName] = useState("No file selected")
   const [isRecording, setIsRecording] = useState(false)
@@ -34,12 +25,24 @@ export default function ParrotAI() {
   const [outputUrl, setOutputUrl] = useState<string | null>(null)
   const [voiceInput, setVoiceInput] = useState(false)
   const [recordingTime, setRecordingTime] = useState(0)
+  const [progress, setProgress] = useState<{ percent: number; message: string } | null>(null)
+  
+  // Audio preview and trim state
+  const [audioUrl, setAudioUrl] = useState<string | null>(null)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [audioDuration, setAudioDuration] = useState(0)
+  const [currentTime, setCurrentTime] = useState(0)
+  const [trimStart, setTrimStart] = useState(0)
+  const [trimEnd, setTrimEnd] = useState(0)
+  const [showTrimControls, setShowTrimControls] = useState(false)
+  const [isTranscribing, setIsTranscribing] = useState(false)
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const voiceRecognitionRef = useRef<any>(null)
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
+  const audioPlayerRef = useRef<HTMLAudioElement | null>(null)
 
   useEffect(() => {
     const SpeechRecognition = window.SpeechRecognition || (window as any).webkitSpeechRecognition
@@ -158,14 +161,26 @@ export default function ParrotAI() {
 
           setReferenceFile(audioFile)
           setFileName(audioFile.name)
+          // Create URL for audio preview
+          const url = URL.createObjectURL(mp3Blob)
+          setAudioUrl(url)
+          setTrimStart(0)
+          setTrimEnd(0)
+          setShowTrimControls(false)
           setIsRecording(false)
-          setStatus({ type: "success", message: "Audio recorded successfully! (MP3)" })
+          setStatus({ type: "success", message: "Audio recorded successfully!" })
         } catch (conversionError) {
           // Fallback: use original blob if conversion fails
           console.log("[v0] MP3 conversion fallback, using original format")
           const audioFile = new File([audioBlob], `recording_${Date.now()}.webm`, { type: audioBlob.type })
           setReferenceFile(audioFile)
           setFileName(audioFile.name)
+          // Create URL for audio preview
+          const url = URL.createObjectURL(audioBlob)
+          setAudioUrl(url)
+          setTrimStart(0)
+          setTrimEnd(0)
+          setShowTrimControls(false)
           setIsRecording(false)
           setStatus({ type: "success", message: "Audio recorded successfully!" })
         }
@@ -193,6 +208,12 @@ export default function ParrotAI() {
       const file = e.target.files[0]
       setReferenceFile(file)
       setFileName(file.name)
+      // Create URL for audio preview
+      const url = URL.createObjectURL(file)
+      setAudioUrl(url)
+      setTrimStart(0)
+      setTrimEnd(0)
+      setShowTrimControls(false)
       if (mediaRecorderRef.current?.state === "recording") {
         stopReferenceRecording()
       }
@@ -216,7 +237,162 @@ export default function ParrotAI() {
       const file = e.dataTransfer.files[0]
       setReferenceFile(file)
       setFileName(file.name)
+      // Create URL for audio preview
+      const url = URL.createObjectURL(file)
+      setAudioUrl(url)
+      setTrimStart(0)
+      setTrimEnd(0)
+      setShowTrimControls(false)
       setStatus({ type: "success", message: "File uploaded successfully!" })
+    }
+  }
+
+  // Audio player controls
+  const togglePlayPause = () => {
+    if (!audioPlayerRef.current) return
+    
+    if (isPlaying) {
+      audioPlayerRef.current.pause()
+    } else {
+      // If trimming, start from trim start
+      if (showTrimControls && audioPlayerRef.current.currentTime < trimStart) {
+        audioPlayerRef.current.currentTime = trimStart
+      }
+      audioPlayerRef.current.play()
+    }
+    setIsPlaying(!isPlaying)
+  }
+
+  const handleAudioLoaded = () => {
+    if (audioPlayerRef.current) {
+      const duration = audioPlayerRef.current.duration
+      setAudioDuration(duration)
+      setTrimEnd(duration)
+    }
+  }
+
+  const handleAudioTimeUpdate = () => {
+    if (audioPlayerRef.current) {
+      const time = audioPlayerRef.current.currentTime
+      setCurrentTime(time)
+      // If trimming and past trim end, pause
+      if (showTrimControls && time >= trimEnd) {
+        audioPlayerRef.current.pause()
+        setIsPlaying(false)
+      }
+    }
+  }
+
+  const handleAudioEnded = () => {
+    setIsPlaying(false)
+    setCurrentTime(0)
+  }
+
+  const clearReferenceAudio = () => {
+    setReferenceFile(null)
+    setFileName("No file selected")
+    if (audioUrl) {
+      URL.revokeObjectURL(audioUrl)
+    }
+    setAudioUrl(null)
+    setAudioDuration(0)
+    setCurrentTime(0)
+    setTrimStart(0)
+    setTrimEnd(0)
+    setShowTrimControls(false)
+    setIsPlaying(false)
+  }
+
+  const applyTrim = async () => {
+    if (!referenceFile || !audioUrl) return
+    
+    try {
+      // Load the audio file
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+      const response = await fetch(audioUrl)
+      const arrayBuffer = await response.arrayBuffer()
+      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
+      
+      // Calculate sample positions
+      const startSample = Math.floor(trimStart * audioBuffer.sampleRate)
+      const endSample = Math.floor(trimEnd * audioBuffer.sampleRate)
+      const trimmedLength = endSample - startSample
+      
+      // Create new buffer with trimmed audio
+      const trimmedBuffer = audioContext.createBuffer(
+        audioBuffer.numberOfChannels,
+        trimmedLength,
+        audioBuffer.sampleRate
+      )
+      
+      for (let channel = 0; channel < audioBuffer.numberOfChannels; channel++) {
+        const sourceData = audioBuffer.getChannelData(channel)
+        const destData = trimmedBuffer.getChannelData(channel)
+        for (let i = 0; i < trimmedLength; i++) {
+          destData[i] = sourceData[startSample + i]
+        }
+      }
+      
+      // Convert to WAV
+      const wavBuffer = encodeWAV(trimmedBuffer)
+      const wavBlob = new Blob([wavBuffer], { type: "audio/wav" })
+      const trimmedFile = new File([wavBlob], `trimmed_${fileName}`, { type: "audio/wav" })
+      
+      // Update state
+      setReferenceFile(trimmedFile)
+      setFileName(trimmedFile.name)
+      if (audioUrl) URL.revokeObjectURL(audioUrl)
+      const newUrl = URL.createObjectURL(wavBlob)
+      setAudioUrl(newUrl)
+      setAudioDuration(trimmedBuffer.duration)
+      setTrimStart(0)
+      setTrimEnd(trimmedBuffer.duration)
+      setShowTrimControls(false)
+      setCurrentTime(0)
+      
+      setStatus({ type: "success", message: `Audio trimmed to ${(trimEnd - trimStart).toFixed(1)}s` })
+    } catch (error) {
+      console.error("Trim error:", error)
+      setStatus({ type: "error", message: "Failed to trim audio" })
+    }
+  }
+
+  // Auto-transcribe using Whisper
+  const autoTranscribe = async () => {
+    if (!referenceFile) {
+      setStatus({ type: "error", message: "Please upload or record audio first" })
+      return
+    }
+
+    setIsTranscribing(true)
+    setStatus({ type: "info", message: "Transcribing audio with Whisper..." })
+
+    try {
+      const formData = new FormData()
+      formData.append("audio_file", referenceFile)
+
+      const response = await fetch("http://localhost:8000/api/transcribe", {
+        method: "POST",
+        body: formData,
+      })
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}))
+        throw new Error(error.detail || "Transcription failed")
+      }
+
+      const data = await response.json()
+      setReferenceText(data.text)
+      setUseManualTranscript(true)
+      setStatus({ type: "success", message: `Transcribed: "${data.text.slice(0, 50)}${data.text.length > 50 ? '...' : ''}"` })
+    } catch (error) {
+      console.error("Transcription error:", error)
+      setStatus({
+        type: "error",
+        message: error instanceof Error ? error.message : "Failed to transcribe audio"
+      })
+    } finally {
+      setIsTranscribing(false)
     }
   }
 
@@ -288,15 +464,18 @@ export default function ParrotAI() {
     }
 
     setLoading(true)
-    setStatus({ type: "info", message: "Generating audio... Please wait" })
+    setProgress({ percent: 0, message: "Starting..." })
+    setStatus({ type: "info", message: "Generating audio..." })
 
     try {
       const formData = new FormData()
       formData.append("prompt", prompt)
-      formData.append("style", style)
+      formData.append("use_transcript", useManualTranscript.toString())
+      formData.append("reference_text", referenceText)
       formData.append("audio_file", referenceFile)
 
-      const response = await fetch("/api/generate", {
+      // Use streaming endpoint for progress updates
+      const response = await fetch("http://localhost:8000/api/generate-stream", {
         method: "POST",
         body: formData,
       })
@@ -306,10 +485,59 @@ export default function ParrotAI() {
         throw new Error(error.detail || `Generation failed: ${response.statusText}`)
       }
 
-      const audioBlob = await response.blob()
-      const url = URL.createObjectURL(audioBlob)
-      setOutputUrl(url)
-      setStatus({ type: "success", message: "Audio generated successfully!" })
+      // Read SSE stream
+      const reader = response.body?.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ""
+
+      if (!reader) {
+        throw new Error("Failed to get response stream")
+      }
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        
+        // Parse SSE events
+        const lines = buffer.split("\n")
+        buffer = lines.pop() || "" // Keep incomplete line in buffer
+
+        let eventType = ""
+        for (const line of lines) {
+          if (line.startsWith("event: ")) {
+            eventType = line.slice(7).trim()
+          } else if (line.startsWith("data: ") && eventType) {
+            try {
+              const data = JSON.parse(line.slice(6))
+              
+              if (eventType === "progress") {
+                setProgress({ percent: data.percent, message: data.message })
+                setStatus({ type: "info", message: data.message })
+              } else if (eventType === "complete") {
+                // Decode base64 audio
+                const byteChars = atob(data.audio)
+                const byteNumbers = new Array(byteChars.length)
+                for (let i = 0; i < byteChars.length; i++) {
+                  byteNumbers[i] = byteChars.charCodeAt(i)
+                }
+                const byteArray = new Uint8Array(byteNumbers)
+                const audioBlob = new Blob([byteArray], { type: "audio/wav" })
+                const url = URL.createObjectURL(audioBlob)
+                setOutputUrl(url)
+                setProgress({ percent: 100, message: "Done!" })
+                setStatus({ type: "success", message: "Audio generated successfully!" })
+              } else if (eventType === "error") {
+                throw new Error(data.message)
+              }
+            } catch (parseError) {
+              // Continue on parse errors
+            }
+            eventType = ""
+          }
+        }
+      }
     } catch (error) {
       console.error("Generation error:", error)
       setStatus({
@@ -319,10 +547,11 @@ export default function ParrotAI() {
       })
     } finally {
       setLoading(false)
+      setProgress(null)
     }
   }
 
-  const selectedStyle = VOICE_STYLES.find((s) => s.value === style)
+
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60)
     const secs = seconds % 60
@@ -400,27 +629,61 @@ export default function ParrotAI() {
                 )}
               </div>
 
-              {/* Voice Style Section */}
-              <div className="space-y-3 flex flex-col items-center">
-                <Label htmlFor="style" className="text-base font-semibold text-center">
-                  Choose Voice Style
-                </Label>
-                <Select value={style} onValueChange={setStyle}>
-                  <SelectTrigger id="style" className="bg-input border-border/50 justify-center text-center">
-                    <SelectValue className="text-center" />
-                  </SelectTrigger>
-                  <SelectContent className="shadow-2xl">
-                    {VOICE_STYLES.map((s) => (
-                      <SelectItem key={s.value} value={s.value}>
-                        <div className="flex flex-col items-center text-center w-full">
-                          <span className="font-medium">{s.label}</span>
-                          <span className="text-xs text-muted-foreground">{s.description}</span>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              {/* Reference Text Section */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <Checkbox
+                    id="useTranscript"
+                    checked={useManualTranscript}
+                    onCheckedChange={(checked) => setUseManualTranscript(checked as boolean)}
+                    disabled={loading}
+                  />
+                  <label htmlFor="useTranscript" className="text-sm font-medium cursor-pointer">
+                    Provide reference text (transcript of reference audio)
+                  </label>
+                </div>
+                {useManualTranscript && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="referenceText" className="text-sm text-muted-foreground">
+                        What is being said in the reference audio?
+                      </Label>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={autoTranscribe}
+                        disabled={!referenceFile || isTranscribing || loading}
+                        className="h-7 text-xs gap-1.5"
+                      >
+                        {isTranscribing ? (
+                          <>
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                            Transcribing...
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="w-3 h-3" />
+                            Auto-transcribe
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                    <Textarea
+                      id="referenceText"
+                      value={referenceText}
+                      onChange={(e) => setReferenceText(e.target.value)}
+                      placeholder="Enter the exact words spoken in the reference audio..."
+                      rows={2}
+                      className="resize-none bg-input border border-border/50 placeholder:text-muted-foreground/50"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Providing a transcript improves voice cloning quality. Click "Auto-transcribe" to use Whisper AI.
+                    </p>
+                  </div>
+                )}
               </div>
+
 
               {/* Divider */}
               <div className="relative">
@@ -433,6 +696,7 @@ export default function ParrotAI() {
                   </span>
                 </div>
               </div>
+
 
               {/* Reference Audio Section */}
               <div className="space-y-4">
@@ -461,19 +725,145 @@ export default function ParrotAI() {
                   />
                 </label>
 
-                {/* File Status */}
-                {referenceFile && (
-                  <div className="flex items-center gap-3 p-4 bg-gradient-to-r from-primary/10 to-accent/5 border border-primary/20 rounded-lg">
-                    <div className="p-2 bg-primary/20 rounded-md">
-                      <Waveform className="w-5 h-5 text-primary" />
+                {/* Audio Player and Controls */}
+                {referenceFile && audioUrl && (
+                  <div className="space-y-4 p-4 bg-gradient-to-r from-primary/10 to-accent/5 border border-primary/20 rounded-lg">
+                    {/* Hidden audio element */}
+                    <audio
+                      ref={audioPlayerRef}
+                      src={audioUrl}
+                      onLoadedMetadata={handleAudioLoaded}
+                      onTimeUpdate={handleAudioTimeUpdate}
+                      onEnded={handleAudioEnded}
+                      className="hidden"
+                    />
+                    
+                    {/* File info and controls */}
+                    <div className="flex items-center gap-3">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={togglePlayPause}
+                        className="h-10 w-10 rounded-full bg-primary/20 hover:bg-primary/30"
+                      >
+                        {isPlaying ? (
+                          <Pause className="w-5 h-5 text-primary" />
+                        ) : (
+                          <Play className="w-5 h-5 text-primary ml-0.5" />
+                        )}
+                      </Button>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-foreground truncate">{fileName}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {formatTime(Math.floor(currentTime))} / {formatTime(Math.floor(audioDuration))}
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => setShowTrimControls(!showTrimControls)}
+                        className={`h-8 w-8 ${showTrimControls ? 'text-primary bg-primary/20' : 'text-muted-foreground'}`}
+                        title="Trim audio"
+                      >
+                        <Scissors className="w-4 h-4" />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={clearReferenceAudio}
+                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                        title="Remove audio"
+                      >
+                        <X className="w-4 h-4" />
+                      </Button>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-foreground truncate">{fileName}</p>
-                      <p className="text-xs text-muted-foreground">Ready to use</p>
+                    
+                    {/* Progress bar */}
+                    <div className="relative h-2 bg-secondary rounded-full overflow-hidden">
+                      {/* Trim region indicator */}
+                      {showTrimControls && (
+                        <div 
+                          className="absolute h-full bg-primary/30"
+                          style={{ 
+                            left: `${(trimStart / audioDuration) * 100}%`,
+                            width: `${((trimEnd - trimStart) / audioDuration) * 100}%`
+                          }}
+                        />
+                      )}
+                      {/* Current position */}
+                      <div 
+                        className="absolute h-full bg-primary transition-all duration-100"
+                        style={{ width: `${(currentTime / audioDuration) * 100}%` }}
+                      />
                     </div>
-                    <Badge className="bg-primary text-primary-foreground">Loaded</Badge>
+                    
+                    {/* Trim controls */}
+                    {showTrimControls && (
+                      <div className="space-y-3 pt-2 border-t border-border/30">
+                        <div className="flex items-center gap-3">
+                          <Label className="text-xs w-12">Start:</Label>
+                          <Slider
+                            value={[trimStart]}
+                            min={0}
+                            max={audioDuration}
+                            step={0.1}
+                            onValueChange={([val]) => setTrimStart(Math.min(val, trimEnd - 0.5))}
+                            className="flex-1"
+                          />
+                          <span className="text-xs text-muted-foreground w-12 text-right">
+                            {formatTime(Math.floor(trimStart))}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <Label className="text-xs w-12">End:</Label>
+                          <Slider
+                            value={[trimEnd]}
+                            min={0}
+                            max={audioDuration}
+                            step={0.1}
+                            onValueChange={([val]) => setTrimEnd(Math.max(val, trimStart + 0.5))}
+                            className="flex-1"
+                          />
+                          <span className="text-xs text-muted-foreground w-12 text-right">
+                            {formatTime(Math.floor(trimEnd))}
+                          </span>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              if (audioPlayerRef.current) {
+                                audioPlayerRef.current.currentTime = trimStart
+                                audioPlayerRef.current.play()
+                                setIsPlaying(true)
+                              }
+                            }}
+                            className="flex-1 text-xs"
+                          >
+                            <Play className="w-3 h-3 mr-1" /> Preview Trim
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={applyTrim}
+                            className="flex-1 text-xs bg-primary"
+                          >
+                            <Scissors className="w-3 h-3 mr-1" /> Apply Trim
+                          </Button>
+                        </div>
+                        <p className="text-xs text-muted-foreground text-center">
+                          Selected: {(trimEnd - trimStart).toFixed(1)}s
+                        </p>
+                      </div>
+                    )}
                   </div>
                 )}
+
 
                 <Button
                   type="button"
@@ -532,12 +922,28 @@ export default function ParrotAI() {
                   </>
                 )}
               </Button>
+
+              {/* Progress Bar */}
+              {progress && (
+                <div className="space-y-2 mt-4">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">{progress.message}</span>
+                    <span className="font-medium text-primary">{progress.percent}%</span>
+                  </div>
+                  <div className="h-2 bg-secondary rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-gradient-to-r from-primary to-accent transition-all duration-500 ease-out"
+                      style={{ width: `${progress.percent}%` }}
+                    />
+                  </div>
+                </div>
+              )}
             </form>
           </CardContent>
         </Card>
 
         {/* Status Messages */}
-        {status && (
+        {status && !progress && (
           <div
             className={`p-4 rounded-lg border animate-in fade-in duration-300 ${status.type === "error"
               ? "bg-destructive/10 border-destructive/30 text-destructive"
@@ -551,6 +957,7 @@ export default function ParrotAI() {
         )}
 
         {outputUrl && (
+
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
             <Card className="border border-border/50 bg-gradient-to-br from-card/80 to-card/40 backdrop-blur-md shadow-2xl">
               <CardContent className="p-8">

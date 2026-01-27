@@ -4,17 +4,19 @@ export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData()
     const prompt = formData.get("prompt") as string
-    const style = formData.get("style") as string
+    const useTranscript = formData.get("use_transcript") as string
+    const referenceText = formData.get("reference_text") as string
     const audioFile = formData.get("audio_file") as File
 
-    if (!prompt || !style || !audioFile) {
+    if (!prompt || !audioFile) {
       return NextResponse.json({ detail: "Missing required fields" }, { status: 400 })
     }
 
     // Forward to your FastAPI backend
     const backendFormData = new FormData()
     backendFormData.append("prompt", prompt)
-    backendFormData.append("style", style)
+    backendFormData.append("use_transcript", useTranscript || "false")
+    backendFormData.append("reference_text", referenceText || "")
     backendFormData.append("audio_file", audioFile)
 
     const response = await fetch("http://localhost:8000/api/generate", {
@@ -30,8 +32,8 @@ export async function POST(request: NextRequest) {
     const audioBlob = await response.blob()
     return new NextResponse(audioBlob, {
       headers: {
-        "Content-Type": "audio/mpeg",
-        "Content-Disposition": 'attachment; filename="generated.mp3"',
+        "Content-Type": "audio/wav",
+        "Content-Disposition": 'attachment; filename="generated.wav"',
       },
     })
   } catch (error) {
