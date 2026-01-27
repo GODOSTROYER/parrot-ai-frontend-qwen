@@ -11,6 +11,11 @@ import { Textarea } from "@/components/ui/textarea"
 import { Slider } from "@/components/ui/slider"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { VoiceLibrary, SaveVoiceDialog, type Voice } from "@/components/voice-library"
+import { ModelSwitcher } from "@/components/model-switcher"
+import { VoiceDesignPanel } from "@/components/voice-design-panel"
+import { CustomVoicePanel } from "@/components/custom-voice-panel"
 
 export default function ParrotAI() {
   const [prompt, setPrompt] = useState("")
@@ -37,12 +42,87 @@ export default function ParrotAI() {
   const [showTrimControls, setShowTrimControls] = useState(false)
   const [isTranscribing, setIsTranscribing] = useState(false)
 
+  // Saved Voices State
+  const [activeTab, setActiveTab] = useState("upload")
+  const [savedVoices, setSavedVoices] = useState<Voice[]>([])
+  const [selectedVoiceId, setSelectedVoiceId] = useState<string | null>(null)
+  const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false)
+  const [isLoadingVoices, setIsLoadingVoices] = useState(false)
+
+  // Model State
+  const [currentModel, setCurrentModel] = useState("base")
+  const [isSwitchingModel, setIsSwitchingModel] = useState(false)
+  const [isGeneratingAux, setIsGeneratingAux] = useState(false)
+
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const voiceRecognitionRef = useRef<any>(null)
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null)
+
+  useEffect(() => {
+    fetchVoices()
+  }, [])
+
+  const fetchVoices = async () => {
+    try {
+      setIsLoadingVoices(true)
+      const response = await fetch("http://localhost:8000/api/voices")
+      if (response.ok) {
+        const data = await response.json()
+        setSavedVoices(data)
+      }
+    } catch (error) {
+      console.error("Failed to fetch voices:", error)
+    } finally {
+      setIsLoadingVoices(false)
+    }
+  }
+
+  const handleSaveVoice = async (name: string) => {
+    if (!referenceFile) return
+
+    const formData = new FormData()
+    formData.append("name", name)
+    formData.append("file", referenceFile)
+    if (useManualTranscript) {
+      formData.append("transcript", referenceText)
+    }
+
+    try {
+      const response = await fetch("http://localhost:8000/api/voices", {
+        method: "POST",
+        body: formData,
+      })
+
+      if (!response.ok) throw new Error("Failed to save voice")
+
+      setStatus({ type: "success", message: "Voice saved to library!" })
+      fetchVoices() // Refresh list
+      setActiveTab("saved") // Switch to saved tab
+      setIsSaveDialogOpen(false)
+    } catch (error) {
+       setStatus({ type: "error", message: "Failed to save voice" })
+    }
+  }
+
+  const handleDeleteVoice = async (voiceId: string) => {
+    try {
+      const response = await fetch(`http://localhost:8000/api/voices/${voiceId}`, {
+        method: "DELETE",
+      })
+
+      if (!response.ok) throw new Error("Failed to delete voice")
+
+      setSavedVoices(savedVoices.filter(v => v.id !== voiceId))
+      if (selectedVoiceId === voiceId) {
+        setSelectedVoiceId(null)
+      }
+    } catch (error) {
+      console.error("Delete error:", error)
+    }
+  }
 
   useEffect(() => {
     const SpeechRecognition = window.SpeechRecognition || (window as any).webkitSpeechRecognition
@@ -445,6 +525,69 @@ export default function ParrotAI() {
     return arrayBuffer
   }
 
+  const handleModelChange = async (newModel: string) => {
+      if (newModel === currentModel) return;
+      
+      setIsSwitchingModel(true);
+      try {
+          const formData = new FormData();
+          formData.append("target_model", newModel);
+          
+          const response = await fetch("http://localhost:8000/api/model/switch", {
+              method: "POST",
+              body: formData
+          });
+          
+          if (!response.ok) throw new Error("Failed to switch model");
+          
+          setCurrentModel(newModel);
+          setStatus({ type: "success", message: `Switched to ${newModel} model` });
+          setOutputUrl(null);
+          
+      } catch (error) {
+          console.error("Model switch error:", error);
+          setStatus({ type: "error", message: "Failed to switch model" });
+      } finally {
+          setIsSwitchingModel(false);
+      }
+  };
+
+  const handleGenerateDesign = async (text: string, instruct: string) => {
+      const formData = new FormData();
+      formData.append("text", text);
+      formData.append("instruct", instruct);
+      
+      try {
+          const response = await fetch("http://localhost:8000/api/generate-design", {
+              method: "POST",
+              body: formData
+          });
+          if (!response.ok) throw new Error("Failed to generate");
+          return await response.blob(); 
+      } catch (error) {
+          setStatus({ type: "error", message: "Generation failed" });
+          return null;
+      }
+  };
+
+  const handleGeneratePreset = async (text: string, speaker: string) => {
+      const formData = new FormData();
+      formData.append("text", text);
+      formData.append("speaker", speaker);
+      
+      try {
+          const response = await fetch("http://localhost:8000/api/generate-preset", {
+              method: "POST",
+              body: formData
+          });
+          if (!response.ok) throw new Error("Failed to generate");
+          return await response.blob(); 
+      } catch (error) {
+          setStatus({ type: "error", message: "Generation failed" });
+          return null;
+      }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
@@ -453,8 +596,13 @@ export default function ParrotAI() {
       return
     }
 
-    if (!referenceFile) {
+    if (activeTab === "upload" && !referenceFile) {
       setStatus({ type: "error", message: "Please upload or record a reference audio file" })
+      return
+    }
+
+    if (activeTab === "saved" && !selectedVoiceId) {
+      setStatus({ type: "error", message: "Please select a voice from the library" })
       return
     }
 
@@ -472,7 +620,12 @@ export default function ParrotAI() {
       formData.append("prompt", prompt)
       formData.append("use_transcript", useManualTranscript.toString())
       formData.append("reference_text", referenceText)
-      formData.append("audio_file", referenceFile)
+      
+      if (activeTab === "upload" && referenceFile) {
+        formData.append("audio_file", referenceFile)
+      } else if (activeTab === "saved" && selectedVoiceId) {
+        formData.append("voice_id", selectedVoiceId)
+      }
 
       // Use streaming endpoint for progress updates
       const response = await fetch("http://localhost:8000/api/generate-stream", {
@@ -589,6 +742,16 @@ export default function ParrotAI() {
         </div>
 
         {/* Main Form Card */}
+        <ModelSwitcher 
+            currentModel={currentModel} 
+            onModelChange={handleModelChange} 
+            isLoading={isSwitchingModel} 
+        />
+
+        {currentModel === "design" && <VoiceDesignPanel onGenerate={handleGenerateDesign} />}
+        {currentModel === "custom" && <CustomVoicePanel onGenerate={handleGeneratePreset} />}
+
+        {currentModel === "base" && (
         <Card className="border border-primary/10 bg-card/90 backdrop-blur-2xl shadow-[0_32px_64px_-16px_rgba(0,0,0,0.1)] ring-1 ring-white/20">
           <CardContent className="p-8">
             <form onSubmit={handleSubmit} className="space-y-8">
@@ -700,6 +863,13 @@ export default function ParrotAI() {
 
               {/* Reference Audio Section */}
               <div className="space-y-4">
+                <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+                  <TabsList className="grid w-full grid-cols-2">
+                    <TabsTrigger value="upload">Upload & Record</TabsTrigger>
+                    <TabsTrigger value="saved">Saved Voices</TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent value="upload" className="space-y-4 pt-4">
                 {/* File Upload Area */}
                 <label
                   onDragOver={handleDragOver}
@@ -778,6 +948,17 @@ export default function ParrotAI() {
                         title="Remove audio"
                       >
                         <X className="w-4 h-4" />
+                      </Button>
+                      <div className="w-px h-6 bg-border mx-1" />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => setIsSaveDialogOpen(true)}
+                        className="h-8 w-8 text-muted-foreground hover:text-primary"
+                        title="Save to Library"
+                      >
+                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
                       </Button>
                     </div>
                     
@@ -885,6 +1066,29 @@ export default function ParrotAI() {
                     </>
                   )}
                 </Button>
+                </TabsContent>
+
+                <TabsContent value="saved" className="pt-4">
+                  <VoiceLibrary 
+                    voices={savedVoices}
+                    selectedVoiceId={selectedVoiceId}
+                    onSelect={(voice) => {
+                      setSelectedVoiceId(voice.id)
+                      if (voice.transcript) {
+                        setReferenceText(voice.transcript)
+                        setUseManualTranscript(true)
+                      }
+                    }}
+                    onDelete={handleDeleteVoice}
+                    isLoading={isLoadingVoices}
+                  />
+                </TabsContent>
+              </Tabs>
+              <SaveVoiceDialog
+                isOpen={isSaveDialogOpen}
+                onOpenChange={setIsSaveDialogOpen}
+                onSave={handleSaveVoice}
+              />
               </div>
 
               {/* Terms Section */}
@@ -941,6 +1145,7 @@ export default function ParrotAI() {
             </form>
           </CardContent>
         </Card>
+        )}
 
         {/* Status Messages */}
         {status && !progress && (
