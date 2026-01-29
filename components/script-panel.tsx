@@ -52,7 +52,7 @@ export function ScriptPanel({ savedVoices, onGenerate }: ScriptPanelProps) {
     const [isGenerating, setIsGenerating] = useState(false);
     const [audioUrl, setAudioUrl] = useState<string | null>(null);
 
-    const addLine = () => {
+    function addLine() {
         setLines([...lines, { 
             id: Date.now().toString(), 
             text: "", 
@@ -60,15 +60,15 @@ export function ScriptPanel({ savedVoices, onGenerate }: ScriptPanelProps) {
             speakerType: "preset",
             config: { ...globalConfig }
         }]);
-    };
+    }
 
-    const removeLine = (id: string) => {
+    function removeLine(id: string) {
         if (lines.length > 1) {
             setLines(lines.filter(l => l.id !== id));
         }
-    };
+    }
 
-    const updateLine = (id: string, field: keyof ScriptLine, value: any) => {
+    function updateLine(id: string, field: keyof ScriptLine, value: any) {
         setLines(lines.map(line => {
             if (line.id === id) {
                 // If changing speaker, detect type
@@ -80,9 +80,9 @@ export function ScriptPanel({ savedVoices, onGenerate }: ScriptPanelProps) {
             }
             return line;
         }));
-    };
+    }
 
-    const handleGenerate = async () => {
+    async function handleGenerate() {
         setIsGenerating(true);
         try {
             // Map lines to backend format, merging global config if we want specific overrides
@@ -105,7 +105,7 @@ export function ScriptPanel({ savedVoices, onGenerate }: ScriptPanelProps) {
         } finally {
             setIsGenerating(false);
         }
-    };
+    }
 
     return (
         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">

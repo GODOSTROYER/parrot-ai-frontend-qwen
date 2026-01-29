@@ -20,6 +20,24 @@ import { ScriptPanel } from "@/components/script-panel"
 import { AdvancedSettings, type GenerationConfig } from "@/components/advanced-settings"
 import { HistorySidebar, type HistoryItem } from "@/components/history-sidebar"
 
+interface SpeechRecognitionEvent {
+  resultIndex: number
+  results: {
+    [key: number]: {
+      [key: number]: { transcript: string }
+      isFinal: boolean
+    }
+    length: number
+  }
+}
+
+interface WindowWithSpeech extends Window {
+  SpeechRecognition: any
+  webkitSpeechRecognition: any
+  AudioContext: typeof AudioContext
+  webkitAudioContext: typeof AudioContext
+}
+
 export default function ParrotAI() {
   const [prompt, setPrompt] = useState("")
   const [referenceText, setReferenceText] = useState("")
@@ -69,9 +87,17 @@ export default function ParrotAI() {
   const [history, setHistory] = useState<HistoryItem[]>([])
 
   useEffect(() => {
-    const saved = localStorage.getItem("parrot_history")
-    if (saved) {
-        try { setHistory(JSON.parse(saved)) } catch (e) { console.error("Failed to load history", e) }
+    try {
+      const saved = localStorage.getItem("parrot_history_meta")
+      if (saved) {
+        // Load only metadata, audio will be populated during session
+        const metadata = JSON.parse(saved)
+        setHistory(metadata.map((m: any) => ({ ...m, audioBase64: "" })))
+      }
+    } catch (e) {
+      console.error("Failed to load history, clearing corrupted data", e)
+      localStorage.removeItem("parrot_history")
+      localStorage.removeItem("parrot_history_meta")
     }
   }, [])
 
@@ -81,12 +107,20 @@ export default function ParrotAI() {
           timestamp: Date.now(),
           text,
           mode,
-          audioBase64: audioData,
+          audioBase64: audioData, // Keep in memory only
           configSummary: `T=${genConfig.temperature} P=${genConfig.top_p} K=${genConfig.top_k}`
       }
       setHistory(prev => {
           const updated = [newItem, ...prev].slice(0, 10) // Limit to 10
-          localStorage.setItem("parrot_history", JSON.stringify(updated))
+          
+          // Save only metadata to localStorage (no audio to avoid quota issues)
+          try {
+            const metadata = updated.map(({ audioBase64, ...rest }) => rest)
+            localStorage.setItem("parrot_history_meta", JSON.stringify(metadata))
+          } catch (storageError) {
+            console.warn("Could not save history to localStorage:", storageError)
+          }
+          
           return updated
       })
   }
@@ -110,7 +144,7 @@ export default function ParrotAI() {
     fetchVoices()
   }, [])
 
-  const fetchVoices = async () => {
+  async function fetchVoices() {
     try {
       setIsLoadingVoices(true)
       const response = await fetch("http://localhost:8000/api/voices")
@@ -125,7 +159,7 @@ export default function ParrotAI() {
     }
   }
 
-  const handleSaveVoice = async (name: string) => {
+  async function handleSaveVoice(name: string) {
     if (!referenceFile) return
 
     const formData = new FormData()
@@ -152,7 +186,7 @@ export default function ParrotAI() {
     }
   }
 
-  const handleDeleteVoice = async (voiceId: string) => {
+  async function handleDeleteVoice(voiceId: string) {
     try {
       const response = await fetch(`http://localhost:8000/api/voices/${voiceId}`, {
         method: "DELETE",
@@ -170,7 +204,9 @@ export default function ParrotAI() {
   }
 
   useEffect(() => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    const win = window as unknown as WindowWithSpeech
+    const SpeechRecognition = win.SpeechRecognition || win.webkitSpeechRecognition
+    
     if (SpeechRecognition) {
       const recognition = new SpeechRecognition()
       recognition.continuous = true
@@ -185,7 +221,7 @@ export default function ParrotAI() {
         setVoiceInput(false)
       }
 
-      recognition.onresult = (event: any) => {
+      recognition.onresult = (event: SpeechRecognitionEvent) => {
         let finalTranscript = ""
         let interimTranscript = ""
 
@@ -208,7 +244,10 @@ export default function ParrotAI() {
     }
 
     // Initialize AudioContext
-    audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)()
+    const AudioContextClass = win.AudioContext || win.webkitAudioContext
+    if (AudioContextClass) {
+        audioContextRef.current = new AudioContextClass()
+    }
   }, [])
 
   const toggleVoiceInput = () => {
@@ -570,7 +609,7 @@ export default function ParrotAI() {
     return arrayBuffer
   }
 
-  const handleModelChange = async (newModel: string) => {
+  async function handleModelChange(newModel: string) {
       if (newModel === currentModel) return;
       
       // Dialogue mode is client-side orchestration, handled by its own endpoint
@@ -601,9 +640,9 @@ export default function ParrotAI() {
       } finally {
           setIsSwitchingModel(false);
       }
-  };
+  }
 
-  const handleGenerateDesign = async (text: string, instruct: string) => {
+  async function handleGenerateDesign(text: string, instruct: string) {
       const formData = new FormData();
       formData.append("text", text);
       formData.append("instruct", instruct);
@@ -628,9 +667,9 @@ export default function ParrotAI() {
           setStatus({ type: "error", message: "Generation failed" });
           return null;
       }
-  };
+  }
 
-  const handleGeneratePreset = async (text: string, speaker: string) => {
+  async function handleGeneratePreset(text: string, speaker: string) {
       const formData = new FormData();
       formData.append("text", text);
       formData.append("speaker", speaker);
@@ -655,9 +694,9 @@ export default function ParrotAI() {
           setStatus({ type: "error", message: "Generation failed" });
           return null;
       }
-  };
+  }
 
-  const handleGenerateDialogue = async (lines: any[]) => {
+  async function handleGenerateDialogue(lines: any[]) {
       try {
           const response = await fetch("http://localhost:8000/api/generate-dialogue", {
               method: "POST",
@@ -680,7 +719,7 @@ export default function ParrotAI() {
       }
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
 
     if (!prompt.trim()) {
@@ -713,7 +752,7 @@ export default function ParrotAI() {
       formData.append("use_transcript", useManualTranscript.toString())
       formData.append("reference_text", referenceText)
       
-        if (activeTab === "upload" && referenceFile) {
+      if (activeTab === "upload" && referenceFile) {
         formData.append("audio_file", referenceFile)
       } else if (activeTab === "saved" && selectedVoiceId) {
         formData.append("voice_id", selectedVoiceId)
@@ -751,22 +790,35 @@ export default function ParrotAI() {
 
         buffer += decoder.decode(value, { stream: true })
         
-        // Parse SSE events
-        const lines = buffer.split("\n")
-        buffer = lines.pop() || "" // Keep incomplete line in buffer
+        // Parse SSE events - split by double newlines for complete events
+        const events = buffer.split("\n\n")
+        buffer = events.pop() || "" // Keep incomplete event in buffer
 
-        let eventType = ""
-        for (const line of lines) {
-          if (line.startsWith("event: ")) {
-            eventType = line.slice(7).trim()
-          } else if (line.startsWith("data: ") && eventType) {
+        for (const eventBlock of events) {
+          if (!eventBlock.trim()) continue
+          
+          const lines = eventBlock.split("\n")
+          let eventType = ""
+          let eventData = ""
+          
+          for (const line of lines) {
+            if (line.startsWith("event: ")) {
+              eventType = line.slice(7).trim()
+            } else if (line.startsWith("data: ")) {
+              eventData = line.slice(6)
+            }
+          }
+          
+          if (eventType && eventData) {
             try {
-              const data = JSON.parse(line.slice(6))
+              const data = JSON.parse(eventData)
               
               if (eventType === "progress") {
                 setProgress({ percent: data.percent, message: data.message })
                 setStatus({ type: "info", message: data.message })
               } else if (eventType === "complete") {
+                console.log("[SSE] Received complete event, audio length:", data.audio?.length || 0)
+                
                 // Decode base64 audio
                 const byteChars = atob(data.audio)
                 const byteNumbers = new Array(byteChars.length)
@@ -776,6 +828,12 @@ export default function ParrotAI() {
                 const byteArray = new Uint8Array(byteNumbers)
                 const audioBlob = new Blob([byteArray], { type: "audio/wav" })
                 const url = URL.createObjectURL(audioBlob)
+                
+                // Revoke previous URL to prevent memory leaks
+                if (outputUrl) {
+                  URL.revokeObjectURL(outputUrl)
+                }
+                
                 setOutputUrl(url)
                 
                 // Add to history
@@ -789,9 +847,12 @@ export default function ParrotAI() {
                 throw new Error(data.message)
               }
             } catch (parseError) {
-              // Continue on parse errors
+              console.error("[SSE] Parse error:", parseError, "EventType:", eventType)
+              // Only continue on minor parse errors, not on complete event failures
+              if (eventType === "complete") {
+                throw parseError
+              }
             }
-            eventType = ""
           }
         }
       }
@@ -831,18 +892,25 @@ export default function ParrotAI() {
                 items={history} 
                 onPlay={(item) => {
                    if (item.audioBase64) {
-                       setAudioUrl(item.audioBase64);
-                       setIsPlaying(false); // Reset player state
+                       // Revoke previous output URL to prevent memory leaks
+                       if (outputUrl) {
+                           URL.revokeObjectURL(outputUrl);
+                       }
+                       // History items are data URIs, set directly as output
+                       setOutputUrl(item.audioBase64);
                    }
                 }}
                 onDelete={(id) => {
                     const updated = history.filter(h => h.id !== id)
                     setHistory(updated)
-                    localStorage.setItem("parrot_history", JSON.stringify(updated))
+                    const metadata = updated.map(({ audioBase64, ...rest }) => rest)
+                    localStorage.setItem("parrot_history_meta", JSON.stringify(metadata))
+                    localStorage.removeItem("parrot_history") // Clear old key
                 }}
                 onClear={() => {
                     setHistory([])
-                    localStorage.setItem("parrot_history", JSON.stringify([]))
+                    localStorage.removeItem("parrot_history_meta")
+                    localStorage.removeItem("parrot_history") // Clear old key
                 }}
               />
           </div>

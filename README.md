@@ -1,30 +1,55 @@
-# Parrot AI Frontend
+# 🦜 Parrot AI - Frontend
 
-*Automatically synced with your [v0.app](https://v0.app) deployments*
+This is the frontend user interface for **Parrot AI**, a voice cloning application powered by Qwen3-TTS. It is built with **Next.js**, **React**, and **Tailwind CSS**.
+
+> **Note:** This frontend is designed to work with the Python Backend.
+> **Backend Repository:** [Voice-Cloner-Qwen-Arnav](https://github.com/GODOSTROYER/Voice-Cloner-Qwen-Arnav)
 
 [![Deployed on Vercel](https://img.shields.io/badge/Deployed%20on-Vercel-black?style=for-the-badge&logo=vercel)](https://vercel.com/madhurboards-projects/v0-parrot-ai-frontend)
-[![Built with v0](https://img.shields.io/badge/Built%20with-v0.app-black?style=for-the-badge)](https://v0.app/chat/lSZs1EnkbDy)
 
-## Overview
+## 🚀 Getting Started
 
-This repository will stay in sync with your deployed chats on [v0.app](https://v0.app).
-Any changes you make to your deployed app will be automatically pushed to this repository from [v0.app](https://v0.app).
+### Prerequisites
 
-## Deployment
+- **Node.js** 18+
+- **Running Backend Server** (Port 8000)
 
-Your project is live at:
+### Installation
 
-**[https://vercel.com/madhurboards-projects/v0-parrot-ai-frontend](https://vercel.com/madhurboards-projects/v0-parrot-ai-frontend)**
+1.  Clone this repository (if you haven't already):
 
-## Build your app
+    ```bash
+    git clone https://github.com/GODOSTROYER/parrot-ai-frontend-qwen.git
+    cd parrot-ai-frontend-qwen
+    ```
 
-Continue building your app on:
+2.  Install dependencies:
 
-**[https://v0.app/chat/lSZs1EnkbDy](https://v0.app/chat/lSZs1EnkbDy)**
+    ```bash
+    npm install
+    ```
 
-## How It Works
+3.  Start the development server:
 
-1. Create and modify your project using [v0.app](https://v0.app)
-2. Deploy your chats from the v0 interface
-3. Changes are automatically pushed to this repository
-4. Vercel deploys the latest version from this repository
+    ```bash
+    npm run dev
+    ```
+
+4.  Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+## 🔗 Connecting to Backend
+
+The frontend expects the backend API to be running at `http://localhost:8000`.
+
+If you haven't set up the backend yet, please visit the [Backend Repository](https://github.com/GODOSTROYER/Voice-Cloner-Qwen-Arnav) for installation instructions.
+
+## 🛠️ Stack
+
+- **Framework**: [Next.js](https://nextjs.org/)
+- **Styling**: [Tailwind CSS](https://tailwindcss.com/)
+- **UI Components**: [Shadcn UI](https://ui.shadcn.com/)
+- **Icons**: [Lucide React](https://lucide.dev/)
+
+## 📜 License
+
+See the main repository for license details.
